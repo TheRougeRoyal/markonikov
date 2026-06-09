@@ -457,8 +457,13 @@
 
       <!-- ============= TRAIN ============= -->
       <section class="panel active visible" id="panel-train" role="tabpanel">
-        <label for="train-text">raw corpus</label>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <label for="train-text">raw corpus</label>
+          <input type="file" id="train-file" accept=".txt" style="display:none;" />
+          <button class="btn" style="padding: 6px 12px; font-size: 12px;" id="btn-upload">📁 upload .txt</button>
+        </div>
         <textarea id="train-text" placeholder="// paste raw text here. more is better. try at least a few hundred words."></textarea>
+        <div id="file-info" style="margin-top: 8px; color: var(--fg-dim); font-size: 12px; display: none;"></div>
 
         <div class="row">
           <div>
@@ -673,6 +678,41 @@ stateSize.addEventListener("input", () => {
 $("#btn-train-clear").addEventListener("click", () => {
   $("#train-text").value = "";
   setOutput($("#train-out"), "");
+  $("#file-info").textContent = "";
+  $("#file-info").style.display = "none";
+});
+
+$("#btn-upload").addEventListener("click", () => {
+  $("#train-file").click();
+});
+
+$("#train-file").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  if (!file.name.endsWith(".txt")) {
+    setOutput($("#train-out"), "✘ please select a .txt file.", "error");
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    const text = evt.target.result;
+    $("#train-text").value = text;
+
+    const wordCount = text.trim().split(/\s+/).length;
+    const fileInfo = $$("#file-info")[0];
+    fileInfo.textContent = `📄 ${file.name} — ${wordCount} words`;
+    fileInfo.style.display = "block";
+    setOutput($("#train-out"), "");
+  };
+  reader.onerror = () => {
+    setOutput($("#train-out"), "✘ error reading file.", "error");
+  };
+  reader.readAsText(file);
+
+  // reset input so same file can be loaded again
+  e.target.value = "";
 });
 
 $("#btn-train").addEventListener("click", async () => {

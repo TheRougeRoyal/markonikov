@@ -212,58 +212,22 @@ async def combine(request: CombineRequest):
             detail="Need at least two models to combine",
         )
 
-    # Load raw JSON for each model, then merge into a combined markovify.Text
-    models_json: List[str] = []
+    # Load each model, then combine them using markovify.combine
+    models = []
     for mid in request.model_ids:
         if "/" in mid or "\\" in mid or ".." in mid:
             raise HTTPException(status_code=400, detail="Invalid model id")
         fp = os.path.join(MODELS_DIR, f"{mid}.json")
         if not os.path.exists(fp):
             raise HTTPException(status_code=404, detail=f"Model not found: {mid}")
-        with open(fp, "r") as f:
-            models_json.append(f.read())
+        try:
+            models.append(engine.load_model(fp))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to load model {mid}: {e}")
 
-    # Combine models by rebuilding a single markovify.Text from a weighted
-    # pool of each model's parsed sentences. Heavier weights repeat sentences
-    # more often, so they show up more in generated output.
     try:
-        weight_total = sum(max(w, 0.0) for w in request.weights) or 1.0
-
-        # Rebuild sentence pools per source model. markovify's serialized JSON
-        # stores parsed_sentences as a list of stringified token lists
-        # (e.g. "['a','b']"), so we decode them with ast.literal_eval.
-        pools: List[List[str]] = []
-        for raw in models_json:
-            parsed = json.loads(raw).get("parsed_sentences", [])
-            decoded: List[str] = []
-            for entry in parsed:
-                try:
-                    if isinstance(entry, list):
-                        tokens = entry
-                    elif isinstance(entry, str):
-                        tokens = ast.literal_eval(entry)
-                    else:
-                        continue
-                    decoded.append(" ".join(tokens))
-                except Exception:
-                    continue
-            pools.append(decoded)
-
-        # Build the weighted corpus. Round weights to 1..10 repeats so the
-        # heaviest model contributes ~10x the sentences of the lightest.
-        weighted_corpus: List[str] = []
-        for pool, w in zip(pools, request.weights):
-            repeat = max(1, int(round((max(w, 0.0) / weight_total) * 10)))
-            for _ in range(repeat):
-                weighted_corpus.extend(pool)
-        random.shuffle(weighted_corpus)
-
-        # Use the first source model's state_size for the combined model.
-        first_meta = _read_meta(request.model_ids[0])
-        combined_state_size = first_meta.get("state_size", 2)
-        combined = markovify.Text(
-            "\n".join(weighted_corpus), state_size=combined_state_size
-        )
+        combined = markovify.combine(models, request.weights)
+        combined_state_size = combined.state_size
 
         new_id = str(uuid.uuid4())
         new_path = os.path.join(MODELS_DIR, f"{new_id}.json")

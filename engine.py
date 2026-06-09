@@ -3,13 +3,14 @@ import os
 import json
 
 
-def build_model(text, state_size=2):
+def build_model(text, state_size=2, newline=False):
     """
-    Build a markovify.Text model from the given text.
+    Build a markovify.Text or markovify.NewlineText model from the given text.
 
     Args:
         text (str): The input text to build the model from.
         state_size (int): The number of previous words to consider for the next word.
+        newline (bool): Whether to use markovify.NewlineText instead of markovify.Text.
 
     Returns:
         markovify.Text: The constructed Markov model.
@@ -20,19 +21,23 @@ def build_model(text, state_size=2):
     if not text:
         raise ValueError("Input text cannot be empty or None")
     try:
-        model = markovify.Text(text, state_size=state_size)
+        if newline:
+            model = markovify.NewlineText(text, state_size=state_size)
+        else:
+            model = markovify.Text(text, state_size=state_size)
         return model
     except Exception as e:
         raise RuntimeError(f"Failed to build model: {e}")
 
 
-def generate_sentences(model, count=5):
+def generate_sentences(model, count=5, test_output=True):
     """
     Generate a list of sentences from the model.
 
     Args:
         model (markovify.Text): The trained Markov model.
         count (int): The number of sentences to generate.
+        test_output (bool): Whether to perform the overlap check.
 
     Returns:
         list: A list of generated sentences (strings). May contain fewer than `count` if sentence generation fails.
@@ -41,16 +46,16 @@ def generate_sentences(model, count=5):
         return []
     sentences = []
     attempts = 0
-    max_attempts = count * 2  # Avoid infinite loop
+    max_attempts = count * 10  # Avoid infinite loop
     while len(sentences) < count and attempts < max_attempts:
-        sentence = model.make_sentence()
+        sentence = model.make_sentence(test_output=test_output)
         if sentence:
             sentences.append(sentence)
         attempts += 1
     return sentences
 
 
-def generate_short_sentences(model, count=3, max_chars=280):
+def generate_short_sentences(model, count=3, max_chars=280, test_output=True):
     """
     Generate a list of short sentences (within character limit) from the model.
 
@@ -58,6 +63,7 @@ def generate_short_sentences(model, count=3, max_chars=280):
         model (markovify.Text): The trained Markov model.
         count (int): The number of sentences to generate.
         max_chars (int): Maximum characters allowed per sentence.
+        test_output (bool): Whether to perform the overlap check.
 
     Returns:
         list: A list of generated short sentences (strings). May contain fewer than `count`.
@@ -66,10 +72,10 @@ def generate_short_sentences(model, count=3, max_chars=280):
         return []
     sentences = []
     attempts = 0
-    max_attempts = count * 2  # Avoid infinite loop
+    max_attempts = count * 10  # Avoid infinite loop
     while len(sentences) < count and attempts < max_attempts:
-        sentence = model.make_sentence()
-        if sentence and len(sentence) <= max_chars:
+        sentence = model.make_short_sentence(max_chars, test_output=test_output)
+        if sentence:
             sentences.append(sentence)
         attempts += 1
     return sentences

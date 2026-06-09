@@ -38,7 +38,7 @@ def read_text_file(input_path: str) -> str:
 
 def train_command(args: argparse.Namespace) -> int:
     text = read_text_file(args.input)
-    model = build_model(text, state_size=args.state_size)
+    model = build_model(text, state_size=args.state_size, newline=args.newline)
     output_path = resolve_model_path(args.save)
     save_model(model, str(output_path))
     print(f"Saved model to {output_path}")
@@ -52,6 +52,7 @@ def generate_command(args: argparse.Namespace) -> int:
         model,
         count=args.count,
         max_chars=args.max_chars,
+        test_output=not args.no_overlap,
     )
 
     if not sentences:
@@ -87,12 +88,14 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--input", required=True, help="Path to the input text file")
     train_parser.add_argument("--state-size", type=int, default=2, help="Markov state size")
     train_parser.add_argument("--save", required=True, help="Model name to save")
+    train_parser.add_argument("--newline", action="store_true", help="Use NewlineText instead of Text")
     train_parser.set_defaults(func=train_command)
 
     generate_parser = subparsers.add_parser("generate", help="Generate sentences from a saved model")
     generate_parser.add_argument("--model", required=True, help="Model name to load")
     generate_parser.add_argument("--count", type=int, default=5, help="Number of sentences to generate")
     generate_parser.add_argument("--max-chars", type=int, default=280, help="Maximum sentence length")
+    generate_parser.add_argument("--no-overlap", action="store_true", help="Disable overlap check")
     generate_parser.set_defaults(func=generate_command)
 
     combine_parser = subparsers.add_parser("combine", help="Combine two saved models")
