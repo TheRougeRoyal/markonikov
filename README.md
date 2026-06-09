@@ -2,10 +2,6 @@
 
 A lightweight, single-page application and command-line interface for training, combining, and generating text using Markov chains, built with Python, FastAPI, and `markovify`.
 
-The project includes a web UI styled with a retro terminal theme that connects directly to a FastAPI backend.
-
----
-
 ## Features
 
 - **Training**: Train Markov chain models on raw paragraph corpora or newline-separated sentence corpora with custom `state_size` constraints.
@@ -13,8 +9,6 @@ The project includes a web UI styled with a retro terminal theme that connects d
 - **Combining**: Combine two trained models using custom weights to merge their styles and vocabularies.
 - **Management**: Inspect and delete saved models through the UI or the API.
 - **CLI Utilities**: Perform training, generation, and combination from the console.
-
----
 
 ## Folder Structure
 
@@ -25,42 +19,42 @@ The project includes a web UI styled with a retro terminal theme that connects d
 - `api.py`: FastAPI backend implementing the RESTful web endpoints and serving the static frontend.
 - `cli.py`: Command-line interface.
 
----
-
 ## Installation
 
 ### Prerequisites
+
 - Python 3.8 or higher.
 - `git` (optional, for cloning).
 
 ### Steps
-1. **Clone the repository**:
+
+1. **Clone the repository** (if you haven't already):
    ```bash
    git clone <repository-url>
    cd markovify-app
    ```
 
 2. **Set up the virtual environment & install dependencies**:
-   On macOS/Linux:
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
-   On Windows:
-   ```cmd
-   python -m venv .venv
-   call .venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
+   - **Linux / macOS**:
+     ```bash
+     python3 -m venv .venv
+     source .venv/bin/activate
+     pip install -r requirements.txt
+     ```
+   - **Windows**:
+     ```cmd
+     python -m venv .venv
+     call .venv\Scripts\activate
+     pip install -r requirements.txt
+     ```
 
----
+## How to Start the Application
 
-## Running the Application
+### Option 1: Using the provided startup script (recommended)
 
-For a quick one-step startup that launches both the server and the frontend in your browser:
+This launches both the server and opens the frontend in your default browser.
 
-- **Linux / Mac**:
+- **Linux / macOS**:
   ```bash
   ./run.sh
   ```
@@ -69,34 +63,60 @@ For a quick one-step startup that launches both the server and the frontend in y
   run.bat
   ```
 
-Alternatively, run uvicorn manually:
+### Option 2: Manual startup with Uvicorn
+
+If you prefer to start the server manually:
+
 ```bash
+# Ensure virtual environment is activated
+source .venv/bin/activate   # Linux/macOS
+# or .venv\Scripts\activate  # Windows
+
+# Start the server
 python -m uvicorn api:app --host 127.0.0.1 --port 8000
 ```
-Then visit `http://localhost:8000` in your web browser.
 
----
+Then open your web browser and visit: **http://localhost:8000**
 
-## CLI Usage
+## Usage
 
-You can also interact with the engine directly using the command-line:
+### Web Interface
 
-### 1. Train a model
+Once the server is running, navigate to `http://localhost:8000` in your browser. The interface includes tabs for:
+
+1. **Train** – Upload or paste text to train a new model.
+2. **Generate** – Select a model and generate sentences.
+3. **Combine** – Combine two models with adjustable weights.
+4. **Models** – View, inspect, and delete saved models.
+
+### Command-Line Interface
+
+You can also interact directly with the engine via `cli.py`:
+
+#### 1. Train a model
 ```bash
 python cli.py train --input data/sample.txt --state-size 2 --save my_model
 ```
 
-### 2. Generate sentences
+#### 2. Generate sentences
 ```bash
 python cli.py generate --model my_model --count 5 --max-chars 280
 ```
 
-### 3. Combine two models
+#### 3. Combine two models
 ```bash
 python cli.py combine --models model_a model_b --weights 1.5 0.8 --save combined_model
 ```
 
----
+#### 4. List models
+```bash
+python cli.py list
+```
+
+#### 5. Delete a model
+```bash
+python cli.py delete --model my_model
+```
 
 ## API Endpoints Reference
 
@@ -109,20 +129,16 @@ python cli.py combine --models model_a model_b --weights 1.5 0.8 --save combined
 | **POST** | `/combine` | Combine two models with weights | `{"model_ids": ["id_a", "id_b"], "weights": [1.5, 0.5], "save_as": "name"}` | `{"model_id": "combined_uuid"}` |
 | **DELETE** | `/models/{id}` | Permanently delete a model | None | `{"deleted": "model_uuid"}` |
 
----
+## Troubleshooting
 
-## Screen Captures
+- **Port already in use?** Change the port in the `run.sh`/`.bat` file or when starting uvicorn manually (e.g., `--port 8001`).
+- **Virtual environment not activated?** Ensure you run `source .venv/bin/activate` (Linux/macOS) or `.venv\Scripts\activate` (Windows) before installing packages or running commands.
+- **Missing dependencies?** Double-check that you ran `pip install -r requirements.txt` inside the activated virtual environment.
 
-Below are placeholders for the interface:
+## Notes
 
-#### 1. Train Tab
-*Placeholder for training interface*
+- The frontend is served statically by the FastAPI application; no separate frontend server is needed.
+- Model files are stored in the `models/` directory as JSON, with metadata sidecars.
+- Sample training data can be found in the `data/` directory.
 
-#### 2. Generate Tab
-*Placeholder for generation interface*
-
-#### 3. Combine Tab
-*Placeholder for combination interface*
-
-#### 4. Models List Tab
-*Placeholder for models list interface*
+Enjoy generating text with Markov chains!
