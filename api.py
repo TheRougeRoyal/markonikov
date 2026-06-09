@@ -1,8 +1,6 @@
 import os
 import uuid
 import json
-import ast
-import random
 from typing import List, Optional
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
