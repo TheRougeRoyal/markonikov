@@ -1,0 +1,7 @@
+markovify==0.9.4
+packaging==26.2
+setuptools==82.0.1
+Unidecode==1.4.0
+wheel==0.47.0
+fastapi
+uvicorn
