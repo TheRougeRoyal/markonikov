@@ -1,5 +1,3 @@
-"""Basic runner for markovify-app"""
-
 import sys
 
 

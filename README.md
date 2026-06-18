@@ -68,11 +68,7 @@ This launches both the server and opens the frontend in your default browser.
 If you prefer to start the server manually:
 
 ```bash
-# Ensure virtual environment is activated
-source .venv/bin/activate   # Linux/macOS
-# or .venv\Scripts\activate  # Windows
-
-# Start the server
+source .venv/bin/activate
 python -m uvicorn api:app --host 127.0.0.1 --port 8000
 ```
 

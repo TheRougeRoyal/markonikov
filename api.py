@@ -13,7 +13,6 @@ import engine
 
 app = FastAPI(title="Markovify API")
 
-# Add CORS middleware to support local testing and different origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,11 +21,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Pydantic Models
 class TrainRequest(BaseModel):
     text: str
     state_size: int = 2
-    sentence_split: bool = False  # True = newline-separated sentences, False = paragraph
+    sentence_split: bool = False
 
 class TrainResponse(BaseModel):
     model_id: str
@@ -37,7 +35,7 @@ class TrainResponse(BaseModel):
 class GenerateRequest(BaseModel):
     model_id: str
     count: int = 5
-    max_chars: Optional[int] = None  # Optional character limit per sentence
+    max_chars: Optional[int] = None
 
 class GenerateResponse(BaseModel):
     sentences: List[str]
@@ -54,22 +52,19 @@ class ModelsResponse(BaseModel):
 class CombineRequest(BaseModel):
     model_ids: List[str]
     weights: List[float]
-    save_as: Optional[str] = None  # Optional logical name (unused for storage today)
+    save_as: Optional[str] = None
 
 class CombineResponse(BaseModel):
     model_id: str
 
-# Configuration
 MODELS_DIR = "models"
 FRONTEND_DIR = "frontend"
 
-# Ensure directories exist
 os.makedirs(MODELS_DIR, exist_ok=True)
 os.makedirs(FRONTEND_DIR, exist_ok=True)
 
 
 def _read_meta(model_id: str) -> dict:
-    """Read sidecar metadata for a model, returning empty dict if missing/corrupt."""
     meta_path = os.path.join(MODELS_DIR, f"{model_id}.meta.json")
     if not os.path.exists(meta_path):
         return {}
@@ -87,10 +82,7 @@ def _write_meta(model_id: str, meta: dict) -> None:
 
 
 def _build_model_from_request(text: str, state_size: int, sentence_split: bool):
-    """Construct a markovify model, optionally treating each line as a sentence."""
     if sentence_split:
-        # Newline-separated sentences: use markovify.NewlineText to treat each line
-        # as a separate sentence.
         return markovify.NewlineText(text, state_size=state_size)
     return engine.build_model(text, state_size=state_size)
 
@@ -173,14 +165,12 @@ async def list_models():
             created_at=meta.get("created_at", "unknown"),
             sentence_split=meta.get("sentence_split", False),
         ))
-    # newest first
     out.sort(key=lambda m: m.created_at, reverse=True)
     return ModelsResponse(models=out)
 
 
 @app.delete("/models/{model_id}")
 async def delete_model(model_id: str):
-    # Basic safety: only accept uuid-like ids to avoid path traversal.
     if "/" in model_id or "\\" in model_id or ".." in model_id:
         raise HTTPException(status_code=400, detail="Invalid model id")
 
@@ -210,7 +200,6 @@ async def combine(request: CombineRequest):
             detail="Need at least two models to combine",
         )
 
-    # Load each model, then combine them using markovify.combine
     models = []
     for mid in request.model_ids:
         if "/" in mid or "\\" in mid or ".." in mid:
@@ -246,7 +235,6 @@ async def combine(request: CombineRequest):
         raise HTTPException(status_code=500, detail=f"Combine failed: {e}")
 
 
-# Serve frontend statically at "/"
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
 
 

@@ -2,7 +2,6 @@ import os
 from engine import build_model, generate_sentences, generate_short_sentences, save_model, load_model
 
 def main():
-    # Paths
     input_file = 'data/sample.txt'
     model_file = 'models/sample.json'
 
@@ -36,6 +35,4 @@ def main():
         print(f"An error occurred: {e}")
 
 if __name__ == "__main__":
-    # Ensure we are in the markovify-app directory for relative paths
-    # This script will be run from markovify-app/
     main()

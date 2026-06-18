@@ -1,5 +1,3 @@
-"""Command-line interface for markovify-app."""
-
 from __future__ import annotations
 
 import argparse
@@ -21,7 +19,6 @@ MODELS_DIR = BASE_DIR / "models"
 
 
 def resolve_model_path(model_name: str) -> Path:
-    """Resolve a model name to a JSON file path inside the models directory."""
     model_path = Path(model_name)
     if model_path.suffix != ".json":
         model_path = model_path.with_suffix(".json")
@@ -31,7 +28,6 @@ def resolve_model_path(model_name: str) -> Path:
 
 
 def read_text_file(input_path: str) -> str:
-    """Read training text from disk."""
     with open(input_path, "r", encoding="utf-8") as file_handle:
         return file_handle.read()
 
