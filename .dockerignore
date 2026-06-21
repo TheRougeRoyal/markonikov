@@ -1,4 +1,6 @@
 .venv/
+.git/
+.github/
 __pycache__/
 *.pyc
 *.pyo
@@ -9,8 +11,7 @@ models/*.meta.json
 *.db-wal
 *.db-shm
 .env
+*.egg-info/
 dist/
 build/
-*.egg-info/
 .pytest_cache/
-.mypy_cache/

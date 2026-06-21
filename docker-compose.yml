@@ -1,0 +1,18 @@
+version: "3.8"
+
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - markovify-data:/app/data
+      - markovify-db:/app
+    environment:
+      - MARKOVIFY_API_KEY=
+      - MARKOVIFY_DB_PATH=/app/markovify.db
+    restart: unless-stopped
+
+volumes:
+  markovify-data:
+  markovify-db:

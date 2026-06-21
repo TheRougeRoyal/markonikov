@@ -1,25 +1,67 @@
 import os
+import re
 import uuid
 import json
+import logging
+from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Security, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from fastapi.responses import JSONResponse
 
 import markovify
 import engine
+import database
+
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").upper()
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+logger = logging.getLogger("markovify")
+
+BASE_DIR = Path(__file__).resolve().parent
+FRONTEND_DIR = Path(os.environ.get("MARKOVIFY_FRONTEND_DIR", str(BASE_DIR / "frontend")))
+API_KEY = os.environ.get("MARKOVIFY_API_KEY", "")
+
+MODEL_ID_RE = re.compile(r"^[a-f0-9\-]{36}$")
 
 app = FastAPI(title="Markovify API")
 
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.environ.get("MARKOVIFY_CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def verify_api_key(key: Optional[str] = Security(api_key_header)):
+    if not API_KEY:
+        return
+    if key != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid or missing API key")
+
+
+def validate_model_id(model_id: str) -> str:
+    if not MODEL_ID_RE.match(model_id):
+        raise HTTPException(status_code=400, detail="Invalid model id format")
+    return model_id
+
 
 class TrainRequest(BaseModel):
     text: str
@@ -57,28 +99,15 @@ class CombineRequest(BaseModel):
 class CombineResponse(BaseModel):
     model_id: str
 
-MODELS_DIR = "models"
-FRONTEND_DIR = "frontend"
-
-os.makedirs(MODELS_DIR, exist_ok=True)
-os.makedirs(FRONTEND_DIR, exist_ok=True)
+FRONTEND_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _read_meta(model_id: str) -> dict:
-    meta_path = os.path.join(MODELS_DIR, f"{model_id}.meta.json")
-    if not os.path.exists(meta_path):
-        return {}
-    try:
-        with open(meta_path, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _write_meta(model_id: str, meta: dict) -> None:
-    meta_path = os.path.join(MODELS_DIR, f"{model_id}.meta.json")
-    with open(meta_path, "w") as f:
-        json.dump(meta, f)
+@app.on_event("startup")
+async def startup_event():
+    database.init_db()
+    from seed import seed_models
+    seed_models()
+    logger.info("Application started, database initialized, models seeded")
 
 
 def _build_model_from_request(text: str, state_size: int, sentence_split: bool):
@@ -87,26 +116,26 @@ def _build_model_from_request(text: str, state_size: int, sentence_split: bool):
     return engine.build_model(text, state_size=state_size)
 
 
-@app.post("/train", response_model=TrainResponse)
-async def train(request: TrainRequest):
+@app.post("/train", response_model=TrainResponse, dependencies=[Depends(verify_api_key)])
+@limiter.limit("5/minute")
+async def train(request: Request, body: TrainRequest):
     try:
         model = _build_model_from_request(
-            request.text, request.state_size, request.sentence_split
+            body.text, body.state_size, body.sentence_split
         )
         model_id = str(uuid.uuid4())
-        filepath = os.path.join(MODELS_DIR, f"{model_id}.json")
-        engine.save_model(model, filepath)
+        model_json = model.to_json()
         created_at = datetime.now(timezone.utc).isoformat()
-        _write_meta(model_id, {
-            "state_size": request.state_size,
-            "created_at": created_at,
-            "sentence_split": request.sentence_split,
-        })
+        preview = body.text[:200] if body.text else None
+        database.save_model_to_db(
+            model_id, model_json, body.state_size, body.sentence_split,
+            created_at, training_text_preview=preview,
+        )
         return TrainResponse(
             model_id=model_id,
-            state_size=request.state_size,
+            state_size=body.state_size,
             created_at=created_at,
-            sentence_split=request.sentence_split,
+            sentence_split=body.sentence_split,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -116,118 +145,118 @@ async def train(request: TrainRequest):
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
 
 
-@app.post("/generate", response_model=GenerateResponse)
-async def generate(request: GenerateRequest):
-    filepath = os.path.join(MODELS_DIR, f"{request.model_id}.json")
-    if not os.path.exists(filepath):
+@app.post("/generate", response_model=GenerateResponse, dependencies=[Depends(verify_api_key)])
+@limiter.limit("10/minute")
+async def generate(request: Request, body: GenerateRequest):
+    validate_model_id(body.model_id)
+    model_json = database.load_model_from_db(body.model_id)
+    if not model_json:
         raise HTTPException(status_code=404, detail="Model not found")
 
     try:
-        model = engine.load_model(filepath)
-        if request.max_chars and request.max_chars > 0:
+        model = markovify.Text.from_json(model_json)
+        if body.max_chars and body.max_chars > 0:
             sentences = engine.generate_short_sentences(
-                model, count=request.count, max_chars=request.max_chars
+                model, count=body.count, max_chars=body.max_chars
             )
         else:
-            sentences = engine.generate_sentences(model, count=request.count)
+            sentences = engine.generate_sentences(model, count=body.count)
         return GenerateResponse(sentences=sentences)
     except ValueError as e:
         raise HTTPException(status_code=500, detail=f"Model corrupted: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
 
+
 @app.get("/health")
-async def health():
-    if not os.path.exists(MODELS_DIR):
-        count = 0
-    else:
-        count = len([
-            fname for fname in os.listdir(MODELS_DIR)
-            if fname.endswith(".json") and not fname.endswith(".meta.json")
-        ])
-    return {"status": "ok", "models_count": count}
+@limiter.limit("30/minute")
+async def health(request: Request):
+    count = database.model_count()
+    integrity = {"total": count, "valid": 0, "corrupted": []}
 
-
-@app.get("/models", response_model=ModelsResponse)
-async def list_models():
-    if not os.path.exists(MODELS_DIR):
-        return ModelsResponse(models=[])
-
-    out: List[ModelInfo] = []
-    for fname in os.listdir(MODELS_DIR):
-        if not fname.endswith(".json") or fname.endswith(".meta.json"):
+    models = database.list_models()
+    for m in models:
+        model_json = database.load_model_from_db(m["model_id"])
+        if not model_json:
+            integrity["corrupted"].append(m["model_id"])
             continue
-        model_id = os.path.splitext(fname)[0]
-        meta = _read_meta(model_id)
-        out.append(ModelInfo(
-            model_id=model_id,
-            state_size=meta.get("state_size", 2),
-            created_at=meta.get("created_at", "unknown"),
-            sentence_split=meta.get("sentence_split", False),
-        ))
-    out.sort(key=lambda m: m.created_at, reverse=True)
-    return ModelsResponse(models=out)
+        try:
+            markovify.Text.from_json(model_json)
+            integrity["valid"] += 1
+        except Exception:
+            integrity["corrupted"].append(m["model_id"])
+
+    status = "ok" if not integrity["corrupted"] else "degraded"
+    return {
+        "status": status,
+        "models_count": count,
+        "integrity": integrity,
+    }
 
 
-@app.delete("/models/{model_id}")
-async def delete_model(model_id: str):
-    if "/" in model_id or "\\" in model_id or ".." in model_id:
-        raise HTTPException(status_code=400, detail="Invalid model id")
+@app.get("/models", response_model=ModelsResponse, dependencies=[Depends(verify_api_key)])
+@limiter.limit("10/minute")
+async def list_models(request: Request):
+    models = database.list_models()
+    return ModelsResponse(models=[
+        ModelInfo(
+            model_id=m["model_id"],
+            state_size=m["state_size"],
+            created_at=m["created_at"],
+            sentence_split=m["sentence_split"],
+        )
+        for m in models
+    ])
 
-    filepath = os.path.join(MODELS_DIR, f"{model_id}.json")
-    meta_path = os.path.join(MODELS_DIR, f"{model_id}.meta.json")
-    if not os.path.exists(filepath):
+
+@app.delete("/models/{model_id}", dependencies=[Depends(verify_api_key)])
+@limiter.limit("5/minute")
+async def delete_model(request: Request, model_id: str):
+    validate_model_id(model_id)
+    deleted = database.delete_model_from_db(model_id)
+    if not deleted:
         raise HTTPException(status_code=404, detail="Model not found")
-    try:
-        os.remove(filepath)
-        if os.path.exists(meta_path):
-            os.remove(meta_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete: {e}")
     return {"deleted": model_id}
 
 
-@app.post("/combine", response_model=CombineResponse)
-async def combine(request: CombineRequest):
-    if len(request.model_ids) != len(request.weights):
+@app.post("/combine", response_model=CombineResponse, dependencies=[Depends(verify_api_key)])
+@limiter.limit("3/minute")
+async def combine(request: Request, body: CombineRequest):
+    if len(body.model_ids) != len(body.weights):
         raise HTTPException(
             status_code=400,
             detail="model_ids and weights must be the same length",
         )
-    if len(request.model_ids) < 2:
+    if len(body.model_ids) < 2:
         raise HTTPException(
             status_code=400,
             detail="Need at least two models to combine",
         )
 
     models = []
-    for mid in request.model_ids:
-        if "/" in mid or "\\" in mid or ".." in mid:
-            raise HTTPException(status_code=400, detail="Invalid model id")
-        fp = os.path.join(MODELS_DIR, f"{mid}.json")
-        if not os.path.exists(fp):
+    for mid in body.model_ids:
+        validate_model_id(mid)
+        model_json = database.load_model_from_db(mid)
+        if not model_json:
             raise HTTPException(status_code=404, detail=f"Model not found: {mid}")
         try:
-            models.append(engine.load_model(fp))
+            models.append(markovify.Text.from_json(model_json))
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to load model {mid}: {e}")
 
     try:
-        combined = markovify.combine(models, request.weights)
+        combined = markovify.combine(models, body.weights)
         combined_state_size = combined.state_size
 
         new_id = str(uuid.uuid4())
-        new_path = os.path.join(MODELS_DIR, f"{new_id}.json")
-        engine.save_model(combined, new_path)
+        model_json = combined.to_json()
         created_at = datetime.now(timezone.utc).isoformat()
-        _write_meta(new_id, {
-            "state_size": combined_state_size,
-            "created_at": created_at,
-            "sentence_split": False,
-            "combined_from": list(request.model_ids),
-            "weights": list(request.weights),
-            "save_as": request.save_as,
-        })
+        database.save_model_to_db(
+            new_id, model_json, combined_state_size, False, created_at,
+            combined_from=list(body.model_ids),
+            weights=list(body.weights),
+            save_as=body.save_as,
+        )
         return CombineResponse(model_id=new_id)
     except HTTPException:
         raise
@@ -235,9 +264,19 @@ async def combine(request: CombineRequest):
         raise HTTPException(status_code=500, detail=f"Combine failed: {e}")
 
 
-app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Rate limit exceeded. Try again later."},
+    )
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    host = os.environ.get("MARKOVIFY_HOST", "0.0.0.0")
+    port = int(os.environ.get("MARKOVIFY_PORT", "8000"))
+    uvicorn.run(app, host=host, port=port)

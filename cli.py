@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 from pathlib import Path
 import sys
 
@@ -76,6 +78,58 @@ def combine_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def list_command(args: argparse.Namespace) -> int:
+    if not MODELS_DIR.exists():
+        print("No models directory found.")
+        return 0
+
+    model_files = sorted(MODELS_DIR.glob("*.json"))
+    meta_files = {f.stem.replace(".meta", ""): f for f in MODELS_DIR.glob("*.meta.json")}
+
+    if not model_files:
+        print("No models found.")
+        return 0
+
+    print(f"{'Model Name':<30} {'State Size':<12} {'Created'}")
+    print("-" * 70)
+
+    for model_file in model_files:
+        name = model_file.stem
+        meta_path = meta_files.get(name)
+        state_size = "2"
+        created = "unknown"
+
+        if meta_path and meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+                state_size = str(meta.get("state_size", 2))
+                created = meta.get("created_at", "unknown")[:19]
+            except Exception:
+                pass
+
+        print(f"{name:<30} {state_size:<12} {created}")
+
+    print(f"\nTotal: {len(model_files)} model(s)")
+    return 0
+
+
+def delete_command(args: argparse.Namespace) -> int:
+    model_path = resolve_model_path(args.model)
+    model_json = MODELS_DIR / f"{model_path.stem}.json"
+    meta_json = MODELS_DIR / f"{model_path.stem}.meta.json"
+
+    if not model_json.exists():
+        print(f"Error: Model '{args.model}' not found.", file=sys.stderr)
+        return 1
+
+    model_json.unlink()
+    if meta_json.exists():
+        meta_json.unlink()
+
+    print(f"Deleted model: {args.model}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Markovify CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -105,6 +159,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     combine_parser.add_argument("--save", required=True, help="Model name to save")
     combine_parser.set_defaults(func=combine_command)
+
+    list_parser = subparsers.add_parser("list", help="List all saved models")
+    list_parser.set_defaults(func=list_command)
+
+    delete_parser = subparsers.add_parser("delete", help="Delete a saved model")
+    delete_parser.add_argument("--model", required=True, help="Model name to delete")
+    delete_parser.set_defaults(func=delete_command)
 
     return parser
 
