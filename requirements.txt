@@ -5,3 +5,5 @@ Unidecode==1.4.0
 wheel==0.47.0
 fastapi
 uvicorn
+gunicorn
+slowapi
